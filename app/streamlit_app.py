@@ -117,15 +117,6 @@ def _score_df(model: object, threshold: float, df: pd.DataFrame) -> pd.DataFrame
     st.subheader("Scoring Results")
     st.dataframe(scored_df.head(), use_container_width=True)
     
-    # Download button
-    csv = scored_df.to_csv(index=False)
-    st.download_button(
-        label="Download Scored CSV",
-        data=csv,
-        file_name="fraud_scores.csv",
-        mime="text/csv"
-    )
-    
     # Summary stats
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -291,13 +282,28 @@ def main():
                 st.subheader("Data Preview")
                 st.dataframe(df.head(), use_container_width=True)
                 
+                # Initialize session state for scored results
+                if "scored_df" not in st.session_state:
+                    st.session_state["scored_df"] = None
+                
                 # Scoring form
                 with st.form(key="batch_form"):
                     submitted = st.form_submit_button("Score Transactions", type="primary")
                     
                     if submitted:
                         with st.spinner("Scoring transactions..."):
-                            _score_df(model, threshold, df)
+                            st.session_state["scored_df"] = _score_df(model, threshold, df)
+                
+                # Download button (outside form)
+                if st.session_state["scored_df"] is not None:
+                    scored_df = st.session_state["scored_df"]
+                    csv = scored_df.to_csv(index=False)
+                    st.download_button(
+                        label="Download Scored CSV",
+                        data=csv,
+                        file_name="fraud_scores.csv",
+                        mime="text/csv"
+                    )
         else:
             st.info("Load a dataset (upload or sample) first.")
 
