@@ -619,6 +619,27 @@ Before deploying to production, ensure:
 4. Run quality checks
 5. Submit pull request
 
+## Live Demo
+
+▶ **[Live Demo](https://your-streamlit-url-here)** - Interactive fraud detection demo
+
+### Local Demo Setup
+
+```bash
+# Install demo dependencies
+pip install -r app/requirements.txt
+
+# Run Streamlit demo
+streamlit run app/streamlit_app.py
+```
+
+The demo provides:
+- **Single Prediction**: Enter transaction details for real-time fraud detection
+- **Batch Scoring**: Upload CSV files for bulk transaction analysis
+- **Threshold Policy**: Shows current threshold (≥90% recall) from PR curve optimization
+
+Threshold chosen from PR curve to achieve ≥90% recall (see `data/reports/final_report.md`).
+
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
