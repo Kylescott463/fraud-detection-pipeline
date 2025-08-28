@@ -1,6 +1,21 @@
 # Credit Card Fraud Detection Pipeline
 
+[![Live Demo](https://img.shields.io/badge/Streamlit-Demo-brightgreen?logo=streamlit)](https://fraud-detection-pipeline-kylescott463.streamlit.app/)
+
 A production-ready fraud detection system using machine learning, built with Python, FastAPI, and MLflow.
+
+## How to use (for non-technical folks)
+1. Click the **Live Demo** button at the top.
+2. In the app, choose **Single Prediction** to test one transaction, or go to **Batch Scoring** and **Upload CSV** (or click **Download Sample CSV** inside the app).
+3. Click **Download Scored CSV** to save results.
+
+**Policy:** The model's threshold was chosen from the Precision-Recall curve to catch **≥90% of fraud**.
+
+## Run locally
+```bash
+pip install -r app/requirements.txt
+streamlit run app/streamlit_app.py
+```
 
 ## Features
 
