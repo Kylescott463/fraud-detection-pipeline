@@ -234,6 +234,12 @@ def main():
         st.header("Batch Transaction Scoring")
         st.markdown("Upload a CSV file with transaction data to score multiple transactions.")
         
+        # Initialize session state
+        if "batch_source" not in st.session_state:
+            st.session_state["batch_source"] = None
+        if "batch_df" not in st.session_state:
+            st.session_state["batch_df"] = None
+        
         # Sample dataset buttons
         col1, col2 = st.columns(2)
         with col1:
@@ -246,7 +252,10 @@ def main():
                 mime="text/csv"
             )
         with col2:
-            use_sample = st.button("🎯 Use Sample Dataset", type="secondary")
+            if st.button("🎯 Use Sample Dataset", type="secondary"):
+                st.session_state["batch_source"] = "sample"
+                st.session_state["batch_df"] = sample_df
+                st.rerun()
         
         # File uploader
         uploaded_file = st.file_uploader(
@@ -255,25 +264,22 @@ def main():
             help="CSV must contain columns: Time, Amount, V1, V2, ..., V28"
         )
         
-        # Handle data source (uploaded file takes precedence)
-        df = None
-        data_source = None
-        
+        # Handle uploaded file (takes precedence over sample)
         if uploaded_file is not None:
             try:
-                df = pd.read_csv(uploaded_file)
-                data_source = "uploaded"
-                if use_sample:
-                    st.info("📁 Using uploaded file (sample dataset ignored)")
+                uploaded_df = pd.read_csv(uploaded_file)
+                st.session_state["batch_source"] = "upload"
+                st.session_state["batch_df"] = uploaded_df
+                if st.session_state.get("batch_source") == "sample":
+                    st.info("📁 Using uploaded file. Click 'Use Sample Dataset' again to switch.")
             except Exception as e:
                 st.error(f"Error processing file: {e}")
-        elif use_sample:
-            df = sample_df
-            data_source = "sample"
-            st.success("✅ Sample dataset loaded (50 rows)")
         
-        # Process data if available
-        if df is not None:
+        # Show preview if data is available
+        if st.session_state["batch_df"] is not None:
+            df = st.session_state["batch_df"]
+            source = st.session_state["batch_source"]
+            
             # Validate columns
             is_valid, error_msg = validate_input_data(df)
             
@@ -285,10 +291,15 @@ def main():
                 st.subheader("Data Preview")
                 st.dataframe(df.head(), use_container_width=True)
                 
-                # Score batch
-                if st.button("Score Transactions", type="primary"):
-                    with st.spinner("Scoring transactions..."):
-                        _score_df(model, threshold, df)
+                # Scoring form
+                with st.form(key="batch_form"):
+                    submitted = st.form_submit_button("Score Transactions", type="primary")
+                    
+                    if submitted:
+                        with st.spinner("Scoring transactions..."):
+                            _score_df(model, threshold, df)
+        else:
+            st.info("Load a dataset (upload or sample) first.")
 
 
 if __name__ == "__main__":
