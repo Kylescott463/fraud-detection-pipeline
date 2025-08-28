@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # Constants
 MODEL_PATH = Path("data/models/best_model.joblib")
 THRESHOLD_PATH = Path("data/models/threshold.json")
+METRICS_PATH = Path("data/reports/test_metrics.json")
 REQUIRED_COLUMNS = ["Time", "Amount"] + [f"V{i}" for i in range(1, 29)]
 
 
@@ -40,6 +41,17 @@ def load_artifacts() -> Tuple[object, float]:
     except Exception as e:
         st.error(f"Error loading artifacts: {e}")
         st.stop()
+
+
+def load_test_metrics() -> Optional[Dict]:
+    """Load test metrics if available."""
+    try:
+        with open(METRICS_PATH, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return None
+    except Exception:
+        return None
 
 
 def validate_input_data(df: pd.DataFrame) -> Tuple[bool, str]:
@@ -109,6 +121,28 @@ def _generate_sample_df() -> pd.DataFrame:
     return pd.DataFrame(data)
 
 
+def _generate_template_csv() -> str:
+    """Generate template CSV with headers only."""
+    template_df = pd.DataFrame(columns=REQUIRED_COLUMNS)
+    return template_df.to_csv(index=False)
+
+
+def _generate_scenario_vector(scenario: str) -> List[float]:
+    """Generate deterministic V1-V28 vector based on scenario."""
+    np.random.seed(42)  # Base seed for consistency
+    
+    # Scenario-specific seeds
+    scenario_seeds = {
+        "Typical Purchase": 100,
+        "High Amount": 200,
+        "Rapid Swipes": 300,
+        "Anomalous Pattern": 400
+    }
+    
+    np.random.seed(scenario_seeds.get(scenario, 100))
+    return list(np.random.normal(0, 1, 28))
+
+
 def _score_df(model: object, threshold: float, df: pd.DataFrame) -> pd.DataFrame:
     """Score DataFrame and return results with summary stats."""
     scored_df = score_batch(model, threshold, df)
@@ -118,15 +152,10 @@ def _score_df(model: object, threshold: float, df: pd.DataFrame) -> pd.DataFrame
     st.dataframe(scored_df.head(), use_container_width=True)
     
     # Summary stats
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Total Transactions", len(scored_df))
-    with col2:
-        fraud_count = scored_df["fraud_decision"].sum()
-        st.metric("Fraudulent", fraud_count)
-    with col3:
-        fraud_rate = fraud_count / len(scored_df) * 100
-        st.metric("Fraud Rate", f"{fraud_rate:.2f}%")
+    fraud_count = scored_df["fraud_decision"].sum()
+    fraud_rate = fraud_count / len(scored_df) * 100
+    
+    st.success(f"Flagged {fraud_count} of {len(scored_df)} transactions ({fraud_rate:.1f}%).")
     
     return scored_df
 
@@ -141,22 +170,50 @@ def main():
     
     st.title("🔍 Fraud Detection Demo")
     
-    # Instruction banner
+    # How to use banner
     st.markdown("---")
     st.markdown("### 📋 How to use")
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.markdown("**1)** Try one transaction in Single Prediction")
+        st.markdown("**1)** Try Single Prediction")
     with col2:
-        st.markdown("**2)** Or go to Batch Scoring and Upload CSV (or use our Sample CSV)")
+        st.markdown("**2)** Or go to Batch Scoring → Upload CSV (or click Download Sample CSV)")
     with col3:
-        st.markdown("**3)** Click Download Scored CSV to save the results")
+        st.markdown("**3)** Click Download Scored CSV to save results")
     
-    st.info("Threshold chosen from the PR curve to achieve ≥90% recall.")
+    st.info("Threshold chosen from the Precision-Recall curve to catch ≥90% of fraud.")
     st.markdown("---")
     
     # Load artifacts
     model, threshold = load_artifacts()
+    
+    # Load test metrics for model card
+    test_metrics = load_test_metrics()
+    
+    # Sidebar with model card
+    with st.sidebar:
+        st.header("📊 Model Card")
+        
+        if test_metrics:
+            metrics_at_threshold = test_metrics.get("metrics_at_threshold", {})
+            st.metric("Threshold", f"{threshold:.4f}")
+            st.metric("Recall", f"{metrics_at_threshold.get('recall', 0):.3f}")
+            st.metric("Precision", f"{metrics_at_threshold.get('precision', 0):.3f}")
+            
+            # Best model metrics
+            best_model = test_metrics.get("best_model", "unknown")
+            if best_model in test_metrics.get("test_metrics", {}):
+                model_metrics = test_metrics["test_metrics"][best_model]
+                st.metric("PR-AUC", f"{model_metrics.get('pr_auc', 0):.3f}")
+                st.metric("ROC-AUC", f"{model_metrics.get('roc_auc', 0):.3f}")
+        
+        st.info("**Policy:** ≥90% recall target")
+        
+        st.markdown("---")
+        st.markdown("### ⚠️ Limitations")
+        st.markdown("• V1-V28 features are encoded (not human-interpretable)")
+        st.markdown("• Trained on imbalanced Kaggle dataset")
+        st.markdown("• Results best when new data resembles training distribution")
     
     # Display threshold info
     col1, col2 = st.columns([2, 1])
@@ -172,54 +229,129 @@ def main():
         st.header("Single Transaction Prediction")
         st.markdown("Enter transaction details to get fraud probability and decision.")
         
-        # Input form
-        with st.form("single_prediction"):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                time = st.number_input("Time", min_value=0, value=0, step=1)
-                amount = st.number_input("Amount", min_value=0.0, value=0.0, step=0.01)
-            
-            # V1-V28 inputs in a compact grid
-            v_inputs = {}
-            cols = st.columns(4)
-            for i, v_name in enumerate([f"V{i}" for i in range(1, 29)]):
-                col_idx = i % 4
-                with cols[col_idx]:
-                    v_inputs[v_name] = st.number_input(
-                        v_name, 
-                        value=0.0, 
-                        step=0.01,
-                        format="%.4f"
-                    )
-            
-            submitted = st.form_submit_button("Predict Fraud", type="primary")
-            
-            if submitted:
-                # Prepare inputs
-                inputs = {"Time": time, "Amount": amount, **v_inputs}
-                
-                # Make prediction
-                prob, decision = predict_single(model, threshold, inputs)
-                
-                # Display results
-                st.markdown("---")
-                col1, col2, col3 = st.columns(3)
+        # Simple vs Advanced toggle
+        mode = st.radio(
+            "Mode",
+            ["Simple", "Advanced"],
+            horizontal=True,
+            key="prediction_mode"
+        )
+        
+        if mode == "Simple":
+            # Simple mode inputs
+            with st.form("simple_prediction"):
+                col1, col2 = st.columns(2)
                 
                 with col1:
-                    st.metric("Fraud Probability", f"{prob:.4f}")
+                    time = st.number_input(
+                        "Time", 
+                        min_value=0, 
+                        value=1000, 
+                        step=1,
+                        help="Seconds since dataset start. Example: 1000 ≈ 16 minutes."
+                    )
+                    amount = st.number_input(
+                        "Amount", 
+                        min_value=0.0, 
+                        value=100.0, 
+                        step=0.01,
+                        help="Transaction amount in USD. Try $1–$5000."
+                    )
                 
                 with col2:
-                    decision_text = "🚨 FRAUD" if decision == 1 else "✅ LEGITIMATE"
-                    st.metric("Decision", decision_text)
+                    scenario = st.selectbox(
+                        "Scenario",
+                        ["Typical Purchase", "High Amount", "Rapid Swipes", "Anomalous Pattern"],
+                        help="Choose a transaction scenario to generate realistic V-features"
+                    )
                 
-                with col3:
-                    threshold_status = "Above" if prob >= threshold else "Below"
-                    st.metric("Threshold Status", threshold_status)
+                submitted = st.form_submit_button("Predict Fraud", type="primary")
                 
-                # Show inputs for verification
-                with st.expander("Input Values"):
-                    st.json(inputs)
+                if submitted:
+                    # Generate V-features based on scenario
+                    v_values = _generate_scenario_vector(scenario)
+                    v_inputs = {f"V{i}": v_values[i-1] for i in range(1, 29)}
+                    
+                    # Store in session state for reference
+                    st.session_state["simple_v"] = v_inputs
+                    
+                    # Prepare inputs
+                    inputs = {"Time": time, "Amount": amount, **v_inputs}
+                    
+                    # Make prediction
+                    prob, decision = predict_single(model, threshold, inputs)
+                    
+                    # Display results
+                    st.markdown("---")
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric("Fraud Probability", f"{prob:.4f}")
+                    
+                    with col2:
+                        decision_text = "🚨 FRAUD" if decision == 1 else "✅ LEGITIMATE"
+                        st.metric("Decision", decision_text)
+                    
+                    with col3:
+                        threshold_status = "Above" if prob >= threshold else "Below"
+                        st.metric("Threshold Status", threshold_status)
+                    
+                    # Show generated V-features
+                    with st.expander("Generated V-Features"):
+                        st.json(v_inputs)
+        
+        else:
+            # Advanced mode - existing V1-V28 inputs
+            with st.form("advanced_prediction"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    time = st.number_input("Time", min_value=0, value=0, step=1)
+                    amount = st.number_input("Amount", min_value=0.0, value=0.0, step=0.01)
+                
+                # V1-V28 inputs in expander
+                with st.expander("Encoded Features (V1..V28)"):
+                    st.caption("Encoded (PCA-like) features; not required in Simple mode.")
+                    v_inputs = {}
+                    cols = st.columns(4)
+                    for i, v_name in enumerate([f"V{i}" for i in range(1, 29)]):
+                        col_idx = i % 4
+                        with cols[col_idx]:
+                            v_inputs[v_name] = st.number_input(
+                                v_name, 
+                                value=0.0, 
+                                step=0.01,
+                                format="%.4f",
+                                key=f"advanced_{v_name}"
+                            )
+                
+                submitted = st.form_submit_button("Predict Fraud", type="primary")
+                
+                if submitted:
+                    # Prepare inputs
+                    inputs = {"Time": time, "Amount": amount, **v_inputs}
+                    
+                    # Make prediction
+                    prob, decision = predict_single(model, threshold, inputs)
+                    
+                    # Display results
+                    st.markdown("---")
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric("Fraud Probability", f"{prob:.4f}")
+                    
+                    with col2:
+                        decision_text = "🚨 FRAUD" if decision == 1 else "✅ LEGITIMATE"
+                        st.metric("Decision", decision_text)
+                    
+                    with col3:
+                        threshold_status = "Above" if prob >= threshold else "Below"
+                        st.metric("Threshold Status", threshold_status)
+                    
+                    # Show inputs for verification
+                    with st.expander("Input Values"):
+                        st.json(inputs)
     
     with tab2:
         st.header("Batch Transaction Scoring")
@@ -231,8 +363,8 @@ def main():
         if "batch_df" not in st.session_state:
             st.session_state["batch_df"] = None
         
-        # Sample dataset buttons
-        col1, col2 = st.columns(2)
+        # Dataset options
+        col1, col2, col3 = st.columns(3)
         with col1:
             sample_df = _generate_sample_df()
             csv_data = sample_df.to_csv(index=False)
@@ -243,7 +375,15 @@ def main():
                 mime="text/csv"
             )
         with col2:
-            if st.button("🎯 Use Sample Dataset", type="secondary"):
+            template_csv = _generate_template_csv()
+            st.download_button(
+                label="📋 Download Template CSV (headers only)",
+                data=template_csv,
+                file_name="template_transactions.csv",
+                mime="text/csv"
+            )
+        with col3:
+            if st.button("🎯 Use Sample Dataset", type="secondary", key="use_sample"):
                 st.session_state["batch_source"] = "sample"
                 st.session_state["batch_df"] = sample_df
                 st.rerun()
@@ -266,13 +406,38 @@ def main():
             except Exception as e:
                 st.error(f"Error processing file: {e}")
         
-        # Show preview if data is available
+        # Show preview and schema check if data is available
         if st.session_state["batch_df"] is not None:
             df = st.session_state["batch_df"]
             source = st.session_state["batch_source"]
             
-            # Validate columns
+            # Schema check
+            st.subheader("📋 Schema Check")
             is_valid, error_msg = validate_input_data(df)
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                if is_valid:
+                    st.success("✅ Required columns present")
+                else:
+                    st.error("❌ Missing columns")
+            with col2:
+                extra_cols = set(df.columns) - set(REQUIRED_COLUMNS)
+                if extra_cols:
+                    st.info(f"↩️ {len(extra_cols)} extra columns ignored")
+                else:
+                    st.info("↩️ No extra columns")
+            with col3:
+                st.info(f"🔢 {len(df)} rows")
+            with col4:
+                # Calculate predicted positive rate at current threshold
+                try:
+                    features = df[REQUIRED_COLUMNS].values
+                    probs = model.predict_proba(features)[:, 1]
+                    positive_rate = (probs >= threshold).mean() * 100
+                    st.info(f"📊 {positive_rate:.1f}% predicted positive")
+                except:
+                    st.info("📊 Rate calculation failed")
             
             if not is_valid:
                 st.error(error_msg)
@@ -288,7 +453,7 @@ def main():
                 
                 # Scoring form
                 with st.form(key="batch_form"):
-                    submitted = st.form_submit_button("Score Transactions", type="primary")
+                    submitted = st.form_submit_button("Score transactions", type="primary")
                     
                     if submitted:
                         with st.spinner("Scoring transactions..."):
