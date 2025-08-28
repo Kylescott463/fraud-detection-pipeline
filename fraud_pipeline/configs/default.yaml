@@ -1,0 +1,60 @@
+# Fraud Detection Pipeline Configuration
+
+# Data paths
+data:
+  raw_path: "data/raw/creditcard.csv"
+  processed_path: "data/processed/"
+  models_path: "data/models/"
+  reports_path: "data/reports/"
+
+# Random seed for reproducibility
+seed: 42
+
+# Sampling strategy for imbalanced data
+sampling:
+  strategy: "none"  # Options: none, class_weight, under, smote
+  include_time: true  # Whether to include scaled Time feature
+  random_state: 42
+
+# Model configuration
+models:
+  - name: "random_forest"
+    params:
+      n_estimators: 100
+      max_depth: 10
+      random_state: 42
+  - name: "xgboost"
+    params:
+      n_estimators: 100
+      max_depth: 6
+      learning_rate: 0.1
+      random_state: 42
+  - name: "logistic_regression"
+    params:
+      C: 1.0
+      random_state: 42
+
+# Model serving threshold
+serving:
+  threshold: 0.5
+  min_probability: 0.1
+
+# Training configuration
+training:
+  test_size: 0.2
+  validation_size: 0.2
+  cv_folds: 5
+  scoring: "f1"
+
+# MLflow configuration
+mlflow:
+  tracking_uri: "sqlite:///mlflow.db"
+  experiment_name: "fraud_detection"
+  artifact_location: "data/models/"
+
+# FastAPI configuration
+api:
+  host: "0.0.0.0"
+  port: 8000
+  reload: true
+  workers: 1
